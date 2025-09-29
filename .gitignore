@@ -22,11 +22,13 @@ wheels/
 MANIFEST
 
 # Virtual environments
-.venv/
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-.env
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -35,22 +37,29 @@ env/
 *.swo
 *~
 
-# Project specific
-outputs/
-datasets/
-models/
-input/*.jpg
-input/*.jpeg
-input/*.png
-input/*.bmp
-input/*.tiff
-input/*.tif
+# Jupyter Notebook
+.ipynb_checkpoints
 
-# OS
+# Data files (keep structure but not large files)
+data/output/*/
+!data/output/*/.gitkeep
+data/input/videos/*.mp4
+data/input/videos/*.avi
+data/input/videos/*.mov
+
+# Model files (too large for git)
+models/*.pt
+
+# Temporary files
+*.tmp
+*.temp
 .DS_Store
 Thumbs.db
 
-# raw capture files
-*.mp4
-*.mov
-*.mkv
+# Logs
+*.log
+logs/
+
+# Test outputs
+test_outputs/
+temp/
