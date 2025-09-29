@@ -1,14 +1,13 @@
 # fishdetect
 
-A computer vision package for detecting tiny black fish in images, with filtering to exclude bars and other dark objects.
+A simple computer vision package for fish tracking and background subtraction, designed for basic fish detection in video frames.
 
 ## Features
 
-- **Tiny Fish Detection**: Specifically designed to detect small black fish
-- **Smart Filtering**: Excludes bars, lines, and other non-fish dark objects
-- **Configurable Parameters**: Adjustable size, shape, and color thresholds
-- **Batch Processing**: Process multiple images at once
-- **Visualization**: Generate annotated images showing detected fish
+- **Simple Fish Tracking**: Basic tracking of fish in video frames using background subtraction
+- **Background Subtraction**: Create background models and apply background subtraction
+- **Frame Processing**: Process video frames and save results
+- **Visualization**: Generate annotated images showing tracked fish with shapes and centroids
 
 ## Quick Start
 
@@ -16,61 +15,53 @@ A computer vision package for detecting tiny black fish in images, with filterin
 # Install dependencies
 make setup
 
-# Run detection on an image
-python -m fishdetect.cli detect input/your_image.png --details
+# Run simple tracking test on first 30 frames
+python src/fishdetect/simple_tracking_test.py
 
-# Or use the simple demo script
-python demo.py input/your_image.png
+# Apply background subtraction to 30 frames
+python apply_bg_subtraction_30_frames.py
 ```
 
 ## Usage
 
-### Single Image Detection
+### Simple Tracking Test
 
-```bash
-# Basic detection
-python -m fishdetect.cli detect input/image.png
+The `simple_tracking_test.py` script:
+- Processes the first 30 frames of a video
+- Creates a background model from the first 10 frames
+- Tracks fish using background subtraction
+- Draws shape outlines and centroids
+- Saves tracking data and visualization images
 
-# With detailed output and custom parameters
-python -m fishdetect.cli detect input/image.png \
-  --min-area 100 \
-  --max-area 1500 \
-  --min-aspect 0.4 \
-  --max-aspect 2.5 \
-  --black-threshold 40 \
-  --details
-```
+### Background Subtraction
 
-### Batch Processing
+The `apply_bg_subtraction_30_frames.py` script:
+- Creates a background model using specified frame indices
+- Applies background subtraction to the first 30 frames
+- Saves original and background-subtracted frames
 
-```bash
-# Process all images in input directory
-python -m fishdetect.cli detect-all
+## Configuration
 
-# With custom output directory
-python -m fishdetect.cli detect-all --output results/
-```
-
-### Parameters
-
-- `--min-area`: Minimum area for fish detection (default: 50)
-- `--max-area`: Maximum area for fish detection (default: 2000)
-- `--min-aspect`: Minimum width/height ratio (default: 0.3)
-- `--max-aspect`: Maximum width/height ratio (default: 3.0)
-- `--black-threshold`: Threshold for black color detection (default: 50)
+Both scripts use hardcoded paths that can be modified:
+- Video path: `input/Clutch1_20250804_122715.mp4`
+- Output directory: `Results/SimpleTracking/` or `output/bg_subtracted_30_frames/`
+- Number of fish: 28 (4x7 layout)
+- Frame dimensions: 544x512 pixels
 
 ## Algorithm
 
-The detection algorithm uses:
+The simple tracking algorithm uses:
 
-1. **Preprocessing**: Gaussian blur and adaptive thresholding
-2. **Contour Detection**: Find all dark objects in the image
-3. **Shape Filtering**: Filter by area, aspect ratio, and circularity
-4. **Color Validation**: Verify objects are actually black
-5. **Non-Maximum Suppression**: Remove overlapping detections
+1. **Background Model**: Create background from median of first 10 frames
+2. **Background Subtraction**: Calculate absolute difference between current frame and background
+3. **Thresholding**: Apply binary threshold to create mask
+4. **Morphological Operations**: Clean up the mask
+5. **Contour Detection**: Find connected components
+6. **Shape Analysis**: Filter by area and aspect ratio
+7. **Tracking**: Assign fish numbers based on position in 4x7 grid
 
-## Examples
+## Output
 
-- Add your images to the `input/` folder
-- List input frames: `make list-input`
-- Run CLI commands: `python -m fishdetect.cli --help`
+- **Tracking Images**: Overlay images with fish shapes and centroids
+- **Tracking Data**: NumPy arrays containing centroid coordinates
+- **Background Subtracted Frames**: Binary masks showing detected motion
