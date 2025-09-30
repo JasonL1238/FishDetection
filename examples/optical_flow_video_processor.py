@@ -21,8 +21,9 @@ import sys
 # Add src to path to import our modules
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from masking_methods.optical_flow.optical_flow_masker import OpticalFlowMasker
+from tracking_methods.optical_flow.optical_flow_masker import OpticalFlowMasker
 from image_pre.preprocessor import ImagePreprocessor
+from processing.background_subtractor import BackgroundSubtractor
 
 
 class OpticalFlowVideoProcessor:
@@ -33,7 +34,8 @@ class OpticalFlowVideoProcessor:
     def __init__(self, 
                  bg_subtraction_threshold: int = 25,
                  optical_flow_params: dict = None,
-                 preprocess_params: dict = None):
+                 preprocess_params: dict = None,
+                 bg_subtraction_params: dict = None):
         """
         Initialize the video processor.
         
@@ -41,6 +43,7 @@ class OpticalFlowVideoProcessor:
             bg_subtraction_threshold: Threshold for background subtraction
             optical_flow_params: Parameters for optical flow detection
             preprocess_params: Parameters for image preprocessing
+            bg_subtraction_params: Parameters for background subtraction
         """
         self.bg_subtraction_threshold = bg_subtraction_threshold
         
@@ -63,12 +66,18 @@ class OpticalFlowVideoProcessor:
                 'sharpen_kernel_strength': 1.0
             }
         
+        # Default background subtraction parameters
+        if bg_subtraction_params is None:
+            bg_subtraction_params = {
+                'threshold': bg_subtraction_threshold,
+                'blur_kernel_size': (3, 3),
+                'blur_sigma': 0
+            }
+        
         # Initialize components
         self.optical_flow_masker = OpticalFlowMasker(**optical_flow_params)
         self.preprocessor = ImagePreprocessor(**preprocess_params)
-        
-        # Background model
-        self.background_model = None
+        self.background_subtractor = BackgroundSubtractor(**bg_subtraction_params)
         
     def create_background_model(self, video_path: str, frame_indices: list = None) -> np.ndarray:
         """
@@ -81,53 +90,20 @@ class OpticalFlowVideoProcessor:
         Returns:
             Background model as numpy array
         """
-        if frame_indices is None:
-            # Default background frame indices (from the original tracking program)
-            frame_indices = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000, 22000]
-        
-        print("Loading video for background model creation...")
-        video = pims.PyAVReaderIndexed(video_path)
-        
-        # Extract frames for background model
-        frames = []
-        for idx in frame_indices:
-            if idx < len(video):
-                frame = video[idx][:, :, 0]  # Take only the first channel (grayscale)
-                frames.append(frame)
-        
-        # Create background model using median
-        print(f"Creating background model from {len(frames)} frames...")
-        bg = np.median(np.stack(frames, axis=2), axis=2)
-        
-        # Apply Gaussian blur to smooth the background
-        bg_smoothed = cv2.GaussianBlur(bg.astype(np.float64), (3, 3), 0)
-        
-        return bg_smoothed
+        return self.background_subtractor.create_background_model(video_path, frame_indices)
     
-    def apply_background_subtraction(self, frame: np.ndarray, background: np.ndarray) -> np.ndarray:
+    def apply_background_subtraction(self, frame: np.ndarray, background: np.ndarray = None) -> np.ndarray:
         """
         Apply background subtraction to a single frame.
         
         Args:
             frame: Input frame (grayscale)
-            background: Background model
+            background: Background model (optional, uses stored model if None)
             
         Returns:
             Background subtracted frame
         """
-        # Convert frame to float64 for processing
-        frame_float = frame.astype(np.float64)
-        
-        # Apply Gaussian blur to the frame
-        frame_blurred = cv2.GaussianBlur(frame_float, (3, 3), 0)
-        
-        # Calculate absolute difference
-        mask = np.abs(background - frame_blurred)
-        
-        # Apply threshold to create binary mask
-        _, thresh = cv2.threshold(mask, self.bg_subtraction_threshold, 255, cv2.THRESH_BINARY)
-        
-        return thresh.astype(np.uint8)
+        return self.background_subtractor.apply_background_subtraction(frame, background)
     
     def process_video(self, 
                      video_path: str, 
@@ -160,7 +136,7 @@ class OpticalFlowVideoProcessor:
             os.makedirs(det_dir, exist_ok=True)
         
         # Create background model
-        self.background_model = self.create_background_model(video_path)
+        self.background_subtractor.create_background_model(video_path)
         
         # Load video for processing
         print("Loading video for frame processing...")
@@ -182,7 +158,7 @@ class OpticalFlowVideoProcessor:
             frame = video[i][:, :, 0]
             
             # Apply background subtraction
-            bg_subtracted = self.apply_background_subtraction(frame, self.background_model)
+            bg_subtracted = self.apply_background_subtraction(frame)
             
             # Apply preprocessing to background subtracted frame
             preprocessed = self.preprocessor.preprocess_image(bg_subtracted)
