@@ -8,3 +8,4 @@ from .background_subtraction_masker import BackgroundSubtractionMasker
 
 __all__ = ['BackgroundSubtractionMasker']
 
+

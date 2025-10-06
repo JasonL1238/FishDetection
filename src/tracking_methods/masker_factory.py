@@ -9,6 +9,7 @@ from .optical_flow.optical_flow_masker import OpticalFlowMasker
 from .canny_edge_detection.canny_masker import CannyMasker
 from .yolo_tracking.yolo_tracker import YOLOTracker
 from .background_subtraction.background_subtraction_masker import BackgroundSubtractionMasker
+from .hsv_masking.hsv_masker import HSVMasker
 
 
 class MaskerFactory:
@@ -38,6 +39,8 @@ class MaskerFactory:
             return YOLOTracker()
         elif method_name == 'background_subtraction':
             return BackgroundSubtractionMasker()
+        elif method_name == 'hsv':
+            return HSVMasker()
         else:
             raise ValueError(f"Unsupported masking method: {method_name}")
     
@@ -49,4 +52,4 @@ class MaskerFactory:
         Returns:
             List of available masking method names
         """
-        return ['optical_flow', 'canny', 'yolo', 'background_subtraction']
+        return ['optical_flow', 'canny', 'yolo', 'background_subtraction', 'hsv']

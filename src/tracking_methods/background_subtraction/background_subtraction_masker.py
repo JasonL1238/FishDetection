@@ -14,7 +14,10 @@ from skimage.measure import label, regionprops
 from skimage.morphology import remove_small_objects
 
 from ..common.base_masker import BaseMasker
-from ...processing.background_subtractor import BackgroundSubtractor
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from processing.background_subtractor import BackgroundSubtractor
 
 
 class BackgroundSubtractionMasker(BaseMasker):
@@ -174,4 +177,5 @@ class BackgroundSubtractionMasker(BaseMasker):
         return (f"BackgroundSubtractionMasker(threshold={self.background_subtractor.threshold}, "
                 f"min_object_size={self.min_object_size}, "
                 f"has_background_model={self.background_model is not None})")
+
 
