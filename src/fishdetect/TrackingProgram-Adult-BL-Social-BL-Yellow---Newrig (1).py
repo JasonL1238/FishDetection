@@ -30,6 +30,11 @@ from matplotlib.pyplot import figure
 from sklearn import metrics 
 import statistics
 
+# Import the new background subtractor abstraction
+import sys
+sys.path.append('/Users/jasonli/FishDetection/src')
+from processing.tracking_program_background_subtractor import TrackingProgramBackgroundSubtractor
+
 #import cv2
 
 #image1 = cv2.imread('C:/Users/phili_000/Documents/PENN/Granato Lab/Programming/test images+videos/background.tif', 0)
@@ -162,24 +167,11 @@ nFramesbg = len(videobg)
 
 #background subtraction
 
+# Create background subtractor instance
+bg_subtractor = TrackingProgramBackgroundSubtractor(threshold=25, blur_kernel_size=(3, 3), blur_sigma=0)
 
-# #first 5 frames should be used to create background
-fr1 = videobg[np.round(0)][:,:,0]
-fr2 = videobg[np.round(2000)][:,:,0]
-fr3 = videobg[np.round(4000)][:,:,0]
-fr4 = videobg[np.round(6000)][:,:,0]
-fr5 = videobg[np.round(8000)][:,:,0]
-fr6 = videobg[np.round(10000)][:,:,0]
-fr7 = videobg[np.round(12000)][:,:,0]
-fr8 = videobg[np.round(14000)][:,:,0]
-fr9 = videobg[np.round(16000)][:,:,0]
-fr10 = videobg[np.round(18000)][:,:,0]
-fr11 = videobg[np.round(20000)][:,:,0]
-fr12 = videobg[np.round(22000)][:,:,0]
-
-bg = np.median(np.stack((fr1, fr2, fr3, fr4, fr5, fr6, fr7, fr8, fr9, fr10, fr11, fr12), axis=2), axis=2)
-
-bg1 = cv2.GaussianBlur(bg.astype(np.float64), (3,3),0)
+# Create background model using the abstraction
+bg1 = bg_subtractor.create_background_model(inDirbg + Namebg)
 
 # fr1 = videobg[np.round(23000)][:,:,0]
 # fr2 = videobg[np.round(12000)][:,:,0]
@@ -233,63 +225,16 @@ bg1 = cv2.GaussianBlur(bg.astype(np.float64), (3,3),0)
 # bg4 = cv2.GaussianBlur(bg.astype(np.float64), (3,3),0)
 
 
-def tracking(bg, img, index):
+def tracking(bg_subtractor, img, index):
 
 #Define some variables that are used to track the points along the back
     
     if index<=nFrames:
-    #Do a background subtraction, and blur the background
-        mask = abs(bg1 - img)
-    #mask[mask < 0] = 0
-
-
-    # if index>=36000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg4 - img)    
-
-    # if index>=12000 and index<24000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg2 - img)    
-
-    # if index>=24000 and index<36000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg3 - img)    
-    
-    
-    # if index>=60000 and index<72000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg6 - img)    
-
-    
-    # if index>=72000 and index<84000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg7 - img)       
-
-    # if index>=84000 and index<=96000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg8 - img)   
-
-    # if index>96000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg8 - img)   
-
-    # if index>=96000 and index<109000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg9 - img)       
-        
-    # if index>=84000:
-    # #Do a background subtraction, and blur the background
-    #     mask = abs(bg7 - img)    
-    # #Do I need to do a gaussian blur?
-
-    mask_smooth = cv2.GaussianBlur(mask, (3,3),0)
-
-    #min_val = -50.0
-    #img_crop = np.where(mask < min_val, img_crop, np.zeros_like(img_crop))
+    #Do a background subtraction using the abstraction
+        mask_smooth = bg_subtractor.apply_background_subtraction(img)
     
     #threshold the mask
-    #th_img = cv2.threshold(mask, 25, 255, cv2.THRESH_BINARY)[1]
-    th_img = cv2.threshold(mask_smooth, 25, 255, cv2.THRESH_BINARY)[1]
+    th_img = mask_smooth
     
     #label the connected components in the thresholded mask
     lb = label(th_img)
@@ -420,8 +365,8 @@ for index, img in enumerate(tqdm(video)):
             
              # img = img[0:800,0:1075]
             
-            #calling the tracking image with bg and individual img
-            timg, y_cent, x_cent, overlay_img = tracking(bg, img, ind)
+            #calling the tracking image with bg_subtractor and individual img
+            timg, y_cent, x_cent, overlay_img = tracking(bg_subtractor, img, ind)
             
             cents[:, 0, ind] = y_cent
             cents[:, 1, ind] = x_cent
