@@ -327,3 +327,11 @@ The pipeline uses a two-stage approach:
 
 The adaptive component uses binary search to dynamically adjust the `min_object_size` parameter to achieve exactly 28 fish detections per frame with no tolerance, ensuring high precision in fish counting.
 
+
+
+
+
+
+
+
+

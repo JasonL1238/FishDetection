@@ -54,8 +54,8 @@ def binary_search_min_size(hsv_masker, bg_subtracted_frame, target_count, min_va
     return best_min_size, best_count, iteration + 1
 
 
-def process_complete_pipeline_v2(video_path, output_dir, fps=20, target_fish=28):
-    """Process first 10 seconds with complete V2 pipeline."""
+def process_complete_pipeline_v2(video_path, output_dir, fps=20, target_fish=28, duration_seconds=10):
+    """Process a specified duration with complete V2 pipeline."""
     
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,7 +63,7 @@ def process_complete_pipeline_v2(video_path, output_dir, fps=20, target_fish=28)
     frames_dir = output_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
     
-    num_frames = fps * 10  # 10 seconds
+    num_frames = int(fps * duration_seconds)
     
     # Initialize V2 background subtractor
     print("Initializing V2 background subtractor (threshold=15 + morphology)...")
@@ -183,7 +183,7 @@ Configuration:
 - Background Subtraction: V2 (Threshold=15, Morphology=5x5 kernel)
 - HSV Masking: Lower HSV=(0,0,100), Upper HSV=(180,255,255)
 - Adaptive Detection: Binary search for exactly {target_fish} fish
-- Frames Processed: {len(fish_counts)} (10 seconds @ {fps} FPS)
+- Frames Processed: {len(fish_counts)} ({duration_seconds} seconds @ {fps} FPS)
 
 Fish Detection Statistics:
 - Average Fish per Frame: {avg_count:.2f}
@@ -227,13 +227,14 @@ Output Files:
 def main():
     """Main execution."""
     video_path = Path("data/input/videos/Clutch1_20250804_122715.mp4")
-    output_dir = Path("data/output/complete_pipeline_v2")
+    output_dir = Path("data/output/complete_pipeline_v2_5min")
     
     process_complete_pipeline_v2(
         video_path=video_path,
         output_dir=output_dir,
         fps=20,
-        target_fish=28
+        target_fish=28,
+        duration_seconds=5 * 60
     )
 
 
