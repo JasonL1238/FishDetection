@@ -1,69 +1,92 @@
-# Pipeline Organization
+# Fish Detection Pipelines
 
-Each pipeline is completely self-contained in its own folder. Scripts and pipeline implementations that belong together are grouped together.
+This directory contains self-contained fish detection pipelines. Each pipeline is completely independent with its own implementation and dependencies.
 
 ## Structure
 
 ```
-examples/
-├── original_pipeline/          # Standalone original pipeline (no dependencies)
-│   ├── complete_pipeline_v2.py
+scripts/
+├── segmented_columns/      # Segmented columns pipeline (ACTIVE)
+│   ├── run.py              # Single run script (10 seconds)
+│   ├── run_all_segments.py # Batch processing (all 4 segments of 20-min video)
+│   ├── run_segment4.py     # Single segment script (segment 4 only)
+│   ├── pipeline.py         # SegmentedColumnsPipeline implementation
+│   ├── base_pipeline.py    # BasePipeline class (local copy)
+│   ├── utils.py            # Utility functions (local copy)
 │   └── README.md
 │
-├── default_columns/            # Default columns pipeline (self-contained)
-│   ├── run.py                  # Script to run the pipeline
-│   ├── pipeline.py             # DefaultBackgroundPipeline
-│   ├── base_pipeline.py        # BasePipeline (local copy)
-│   ├── utils.py                # Utils (local copy)
+├── half_sectioned/         # Half-sectioned pipeline (ACTIVE)
+│   ├── run.py              # Script to run the pipeline
+│   ├── pipeline.py         # HalfSectionedPipeline implementation
+│   ├── base_pipeline.py    # BasePipeline class (local copy)
+│   ├── utils.py            # Utility functions (local copy)
 │   └── README.md
 │
-├── segmented_columns/          # Segmented columns pipeline (self-contained)
-│   ├── run.py                  # Single run script
-│   ├── run_all_segments.py     # Batch processing script
-│   ├── run_segment4.py         # Single segment script
-│   ├── pipeline.py             # SegmentedColumnsPipeline
-│   ├── base_pipeline.py        # BasePipeline (local copy)
-│   ├── utils.py                # Utils (local copy)
-│   └── README.md
-│
-└── half_sectioned/            # Half-sectioned pipeline (self-contained)
-    ├── run.py                  # Script to run the pipeline
-    ├── pipeline.py             # HalfSectionedPipeline
-    ├── base_pipeline.py        # BasePipeline (local copy)
-    ├── utils.py                # Utils (local copy)
+└── default_columns/        # Default columns pipeline (baseline reference)
+    ├── run.py              # Script to run the pipeline
+    ├── pipeline.py         # DefaultBackgroundPipeline implementation
+    ├── base_pipeline.py    # BasePipeline class (local copy)
+    ├── utils.py            # Utility functions (local copy)
     └── README.md
 ```
 
-## Running Pipelines
+## Active Pipelines
 
-Each pipeline can be run independently:
+### Segmented Columns Pipeline
+- **Accuracy:** 86.33% (20,719/24,000 perfect frames)
+- **Method:** 7 vertical columns, 4 fish per column, exhaustive per-column threshold search
+- **Temporal Segments:** 7 segments per video segment
+- **Best for:** Column-based detection with independent per-column adaptation
 
+**Usage:**
 ```bash
-# Original pipeline (standalone, no dependencies)
-python examples/original_pipeline/complete_pipeline_v2.py
+# Single run (10 seconds)
+python -m scripts.segmented_columns.run
 
-# Default columns (self-contained)
-python examples/default_columns/run.py
+# All 4 segments (20 minutes total)
+python -m scripts.segmented_columns.run_all_segments
 
-# Segmented columns - single run (self-contained)
-python examples/segmented_columns/run.py
-
-# Segmented columns - all 4 segments (self-contained)
-python examples/segmented_columns/run_all_segments.py
-
-# Segmented columns - segment 4 only (self-contained)
-python examples/segmented_columns/run_segment4.py
-
-# Half-sectioned (self-contained)
-python examples/half_sectioned/run.py
+# Segment 4 only (15-20 minutes)
+python -m scripts.segmented_columns.run_segment4
 ```
 
-## Key Points
+### Half-Sectioned Pipeline
+- **Accuracy:** 84.97% (20,394/24,000 perfect frames)
+- **Method:** 14 sections (7 top + 7 bottom), 2 fish per section, exhaustive per-section threshold search
+- **Temporal Segments:** 7 segments
+- **Best for:** More granular detection with top/bottom spatial division
 
-- **Each folder is completely independent** - no shared dependencies between pipelines
-- **All imports are local** - each folder has its own copies of BasePipeline and utils
-- **Scripts that use the same pipeline are together** - e.g., all segmented_columns scripts are in one folder
-- **Pipeline implementations are with their scripts** - pipeline.py is in the same folder as run.py
+**Usage:**
+```bash
+# Full video (20 minutes)
+python -m scripts.half_sectioned.run
+```
 
-See each folder's README.md for more details about that specific pipeline.
+### Default Columns Pipeline
+- **Method:** 7 vertical columns, 4 fish per column, global binary search
+- **Baseline reference:** Standard column-based approach without per-column adaptation
 
+**Usage:**
+```bash
+python -m scripts.default_columns.run
+```
+
+## Key Features
+
+- **Self-contained:** Each pipeline folder has all its dependencies
+- **Independent:** No shared code between pipelines (each has its own BasePipeline copy)
+- **Modular:** Easy to add new pipeline variants
+- **Documented:** Each folder has its own README with specific details
+
+## Core Library
+
+All pipelines use the core library in `src/`:
+- `src/tracking_methods/` - HSV masking and detection methods
+- `src/processing/` - Background subtraction (V2)
+- `src/image_pre/` - Image preprocessing utilities
+
+## Output Locations
+
+- **Segmented Columns:** `data/output/SegmentedOutputs/`
+- **Half-Sectioned:** `data/output/HalfSectioned/`
+- **Default Columns:** `data/output/` (configurable in run.py)

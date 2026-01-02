@@ -5,75 +5,59 @@ This document provides a quick reference for the organized project structure.
 ## Directory Organization
 
 ### Core Code (`src/`)
-- `fishdetect/` - Main fish detection modules
-- `image_pre/` - Image preprocessing utilities  
-- `tracking_methods/` - Different tracking algorithms
-  - `canny_edge_detection/` - Edge-based detection
+- `processing/` - Background subtraction methods (V2 is used by all pipelines)
+- `tracking_methods/` - Fish detection algorithms
+  - `hsv_masking/` - HSV-based fish detection (used by all pipelines)
   - `common/` - Shared utilities and base classes
-  - `optical_flow/` - Motion-based detection
-  - `yolo_tracking/` - Deep learning detection
+- `image_pre/` - Image preprocessing utilities
 
-### Scripts (`scripts/`)
-- `tests/` - All test scripts for different methods
-- `analysis/` - Analysis and visualization scripts
+### Active Pipelines (`scripts/`)
+- `segmented_columns/` - **ACTIVE** - Segmented columns pipeline (86.33% accuracy)
+  - 7 columns, 4 fish per column, exhaustive per-column threshold search
+- `half_sectioned/` - **ACTIVE** - Half-sectioned pipeline (84.97% accuracy)
+  - 14 sections (7 top + 7 bottom), 2 fish per section, exhaustive per-section threshold search
+- `default_columns/` - Baseline reference pipeline
+  - 7 columns, 4 fish per column, global binary search
 
-### Examples (`examples/`)
-- Demo scripts and pipeline examples
-- Run these to see the system in action
+Each pipeline folder is self-contained with:
+- `run.py` - Main execution script
+- `pipeline.py` - Pipeline implementation
+- `base_pipeline.py` - BasePipeline class (local copy)
+- `utils.py` - Utility functions (local copy)
+- `README.md` - Pipeline-specific documentation
 
 ### Data (`data/`)
 - `input/videos/` - Input video files
-- `input/frames/` - Preprocessed frame data
-- `output/` - Results organized by method
-  - `simple_tracking/` - Background subtraction results
-  - `optical_flow/` - Optical flow results
-  - `yolo_tracking/` - YOLO detection results
-  - `fish_analysis/` - Analysis visualizations
+- `output/` - Results organized by pipeline
+  - `SegmentedOutputs/` - Segmented columns pipeline results
+  - `HalfSectioned/` - Half-sectioned pipeline results
+  - `StandardPipeline/` - Baseline pipeline results
 
-### Models (`models/`)
-- Pre-trained YOLO model files (.pt)
+## Key Features
 
-### Documentation (`docs/`)
-- README files and documentation
+- **Self-contained pipelines:** Each pipeline has all its dependencies
+- **Independent operation:** No shared code between pipelines
+- **Modular design:** Easy to add new pipeline variants
+- **Comprehensive documentation:** Each pipeline has its own README
 
-## Key Files
-
-### Test Scripts
-- `scripts/tests/test_fish_tracker.py` - Background subtraction test
-- `scripts/tests/test_yolo_fish_detection.py` - YOLO detection test
-- `scripts/tests/test_optical_flow.py` - Optical flow test
-- `scripts/tests/test_yolo_tracking.py` - YOLO tracking test
-
-### Example Scripts
-- `examples/run_optical_flow_pipeline.py` - Full optical flow pipeline
-- `examples/demo_optical_flow.py` - Optical flow demo
-- `examples/optical_flow_video_processor.py` - Video processing
-
-### Analysis Scripts
-- `scripts/analysis/analyze_fish_detection.py` - Detection analysis
-- `scripts/analysis/visualize_yolo_results.py` - YOLO visualization
-- `scripts/analysis/process_preprocessed_canny.py` - Canny processing
-
-## Quick Commands
+## Running Pipelines
 
 ```bash
-# Run tests
-python scripts/tests/test_fish_tracker.py
-python scripts/tests/test_yolo_fish_detection.py
-python scripts/tests/test_optical_flow.py
+# Segmented columns - single run
+python -m scripts.segmented_columns.run
 
-# Run examples
-python examples/run_optical_flow_pipeline.py
-python examples/demo_optical_flow.py
+# Segmented columns - all 4 segments (20 minutes)
+python -m scripts.segmented_columns.run_all_segments
 
-# Run analysis
-python scripts/analysis/analyze_fish_detection.py
+# Half-sectioned - full video (20 minutes)
+python -m scripts.half_sectioned.run
+
+# Default columns - baseline
+python -m scripts.default_columns.run
 ```
 
-## Path Updates
+## Core Library Dependencies
 
-All scripts have been updated to use the new organized structure:
-- Input videos: `data/input/videos/`
-- Output results: `data/output/{method}/`
-- Model files: `models/`
-- Source code: `src/`
+All pipelines use:
+- `src/processing/tracking_program_background_subtractor_v2.py` - V2 background subtraction
+- `src/tracking_methods/hsv_masking/hsv_masker.py` - HSV-based fish detection
