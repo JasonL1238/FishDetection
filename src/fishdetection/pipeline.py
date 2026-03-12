@@ -169,8 +169,10 @@ class CustomGridPipeline(BasePipeline):
                             x0, y0, x1, y1 = cells[ci]
                             cell_w = x1 - x0
                             cell_h = y1 - y0
-                            x_norm = (cx - x0) / cell_w if cell_w > 0 else 0.0
-                            y_norm = (y1 - cy) / cell_h if cell_h > 0 else 0.0
+                            center_x = (x0 + x1) / 2
+                            center_y = (y0 + y1) / 2
+                            x_norm = (cx - center_x) / cell_w if cell_w > 0 else 0.0
+                            y_norm = (center_y - cy) / cell_h if cell_h > 0 else 0.0
                             row.extend([round(x_norm, 4), round(y_norm, 4)])
                         else:
                             row.extend(["", ""])
