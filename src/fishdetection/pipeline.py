@@ -9,6 +9,7 @@ output video plus a summary report.
 import cv2
 import numpy as np
 import pims
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -28,6 +29,8 @@ class CustomGridPipeline(BasePipeline):
       3. Find the largest blob in each cell (= 1 fish per cell)
       4. Draw results and collect statistics
     """
+
+    PIPELINE_NAME = "custom_grid"
 
     def __init__(self, *args, num_segments: int = 7, **kwargs):
         super().__init__(*args, **kwargs)
@@ -89,10 +92,12 @@ class CustomGridPipeline(BasePipeline):
         print(f"Target: 1 fish per cell (largest blob)")
         print(f"Temporal segments: {self.num_segments}")
 
+        self._run_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        base_name = (f"{self._run_timestamp}_{self.PIPELINE_NAME}_"
+                     f"{num_cells}cells_{self.num_segments}seg")
+
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        video_out = output_dir / (
-            f"custom_grid_{num_cells}cells_{self.num_segments}seg.mp4"
-        )
+        video_out = output_dir / f"{base_name}.mp4"
         out = cv2.VideoWriter(
             str(video_out), fourcc, self.fps, (width, height), isColor=True
         )
@@ -189,7 +194,8 @@ class CustomGridPipeline(BasePipeline):
                 out.write(output_frame)
 
                 if local_idx % 5 == 0:
-                    fname = (f"frame_{global_idx:04d}_"
+                    fname = (f"{self._run_timestamp}_{self.PIPELINE_NAME}_"
+                             f"frame_{global_idx:04d}_"
                              f"seg{seg_idx + 1}_cells.png")
                     cv2.imwrite(str(frames_dir / fname), output_frame)
 
@@ -225,9 +231,14 @@ class CustomGridPipeline(BasePipeline):
         frames_missing = len(all_cell_counts) - frames_with_all
         n = len(total_fish_counts)
 
+        base_name = (f"{self._run_timestamp}_{self.PIPELINE_NAME}_"
+                     f"{num_cells}cells_{self.num_segments}seg")
+
         summary = f"""
-Custom Grid Pipeline - Results
+{self.PIPELINE_NAME} Pipeline - Results
 ==================================
+Run Date/Time: {self._run_timestamp}
+Pipeline: {self.PIPELINE_NAME}
 
 Configuration:
 - Background Subtraction: threshold={self.threshold}, morph_kernel={self.morph_kernel_size}
@@ -249,15 +260,12 @@ Accuracy:
 - At least one missing: {frames_missing} ({frames_missing / n * 100:.2f}%)
 
 Output Files:
-- Video: custom_grid_{num_cells}cells_{self.num_segments}seg.mp4
+- Video: {base_name}.mp4
 - Background model: background_model.npy
 - Summary: this file
 """
 
-        summary_path = output_dir / (
-            f"custom_grid_{num_cells}cells_"
-            f"{self.num_segments}seg_summary.txt"
-        )
+        summary_path = output_dir / f"{base_name}_summary.txt"
         with open(summary_path, 'w') as f:
             f.write(summary)
 
