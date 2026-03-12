@@ -6,6 +6,7 @@ single largest blob per cell as the fish, and produces an annotated
 output video plus a summary report.
 """
 
+import csv
 import cv2
 import numpy as np
 import pims
@@ -109,6 +110,15 @@ class CustomGridPipeline(BasePipeline):
         ]
         segment_boundaries[-1] = end_frame
 
+        csv_sample_interval = int(self.fps * 2)
+        csv_path = output_dir / f"{base_name}_positions.csv"
+        csv_header = ["time_sec", "frame"]
+        for fish_num in range(1, num_cells + 1):
+            csv_header.extend([f"fish{fish_num}_x_norm", f"fish{fish_num}_y_norm"])
+        csv_file = open(csv_path, "w", newline="")
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(csv_header)
+
         all_cell_counts: List[List[int]] = []
         total_fish_counts: List[int] = []
         frames_with_missing_fish: List[int] = []
@@ -135,7 +145,9 @@ class CustomGridPipeline(BasePipeline):
 
                 all_contours = []
                 all_centroids = []
+                cell_numbers = []
                 cell_counts = [0] * num_cells
+                cell_centroids = [None] * num_cells
 
                 for cell_idx, (x0, y0, x1, y1) in enumerate(cells):
                     contour, centroid = find_largest_blob_in_cell(
@@ -144,7 +156,25 @@ class CustomGridPipeline(BasePipeline):
                     if contour is not None and centroid is not None:
                         all_contours.append(contour)
                         all_centroids.append(centroid)
+                        cell_numbers.append(cell_idx + 1)
                         cell_counts[cell_idx] = 1
+                        cell_centroids[cell_idx] = centroid
+
+                if (global_idx - start_frame) % csv_sample_interval == 0:
+                    time_sec = (global_idx - start_frame) / self.fps
+                    row = [f"{time_sec:.1f}", global_idx]
+                    for ci in range(num_cells):
+                        if cell_centroids[ci] is not None:
+                            cy, cx = cell_centroids[ci]
+                            x0, y0, x1, y1 = cells[ci]
+                            cell_w = x1 - x0
+                            cell_h = y1 - y0
+                            x_norm = (cx - x0) / cell_w if cell_w > 0 else 0.0
+                            y_norm = (y1 - cy) / cell_h if cell_h > 0 else 0.0
+                            row.extend([round(x_norm, 4), round(y_norm, 4)])
+                        else:
+                            row.extend(["", ""])
+                    csv_writer.writerow(row)
 
                 all_cell_counts.append(cell_counts)
                 total_fish_counts.append(len(all_centroids))
@@ -174,9 +204,13 @@ class CustomGridPipeline(BasePipeline):
                     cv2.drawContours(output_frame, all_contours, -1,
                                      (0, 255, 0), 2)
 
-                for y, x in all_centroids:
+                for idx, (y, x) in enumerate(all_centroids):
                     cv2.circle(output_frame, (int(x), int(y)), 5,
                                (0, 0, 255), -1)
+                    cv2.putText(output_frame, str(cell_numbers[idx]),
+                                (int(x) + 8, int(y) - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                                (0, 255, 255), 2)
 
                 total_fish = len(all_centroids)
                 stats = [
@@ -209,6 +243,8 @@ class CustomGridPipeline(BasePipeline):
                           f"avg_total={np.mean(recent):.1f} fish")
 
         out.release()
+        csv_file.close()
+        print(f"Position CSV saved to: {csv_path}")
 
         self._generate_summary(
             output_dir, all_cell_counts, total_fish_counts,
