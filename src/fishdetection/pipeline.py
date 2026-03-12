@@ -17,7 +17,7 @@ from typing import List
 from .background_subtractor import BackgroundSubtractor
 from .hsv_masker import HSVMasker
 from .base_pipeline import BasePipeline
-from .grid import get_grid_cells, find_largest_blob_in_cell
+from .grid import get_grid_cells, find_largest_blob_in_cell, get_cell_mm
 
 
 class CustomGridPipeline(BasePipeline):
@@ -54,7 +54,8 @@ class CustomGridPipeline(BasePipeline):
                 video_path: Path,
                 output_dir: Path,
                 duration_seconds: int = 10,
-                start_frame: int = 0) -> None:
+                start_frame: int = 0,
+                csv_sample_every_n_frames: int = 1) -> None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,14 +111,19 @@ class CustomGridPipeline(BasePipeline):
         ]
         segment_boundaries[-1] = end_frame
 
-        csv_sample_interval = int(self.fps * 2)
+        csv_sample_interval = max(1, int(csv_sample_every_n_frames))
         csv_path = output_dir / f"{base_name}_positions.csv"
-        csv_header = ["time_sec", "frame"]
+        csv_header = ["time_sec", "dt_sec", "frame"]
         for fish_num in range(1, num_cells + 1):
-            csv_header.extend([f"fish{fish_num}_x_norm", f"fish{fish_num}_y_norm"])
+            csv_header.extend([
+                f"fish{fish_num}_x_mm", f"fish{fish_num}_y_mm",
+            ])
         csv_file = open(csv_path, "w", newline="")
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(csv_header)
+        last_csv_frame_idx = None
+
+        cell_mm_sizes = [get_cell_mm(ci) for ci in range(num_cells)]
 
         all_cell_counts: List[List[int]] = []
         total_fish_counts: List[int] = []
@@ -162,21 +168,29 @@ class CustomGridPipeline(BasePipeline):
 
                 if (global_idx - start_frame) % csv_sample_interval == 0:
                     time_sec = (global_idx - start_frame) / self.fps
-                    row = [f"{time_sec:.1f}", global_idx]
+                    if last_csv_frame_idx is None:
+                        dt_sec = 0.0
+                    else:
+                        dt_sec = (global_idx - last_csv_frame_idx) / self.fps
+                    row = [f"{time_sec:.4f}", f"{dt_sec:.4f}", global_idx]
                     for ci in range(num_cells):
                         if cell_centroids[ci] is not None:
                             cy, cx = cell_centroids[ci]
                             x0, y0, x1, y1 = cells[ci]
                             cell_w = x1 - x0
                             cell_h = y1 - y0
+                            w_mm, h_mm = cell_mm_sizes[ci]
                             center_x = (x0 + x1) / 2
                             center_y = (y0 + y1) / 2
                             x_norm = (cx - center_x) / cell_w if cell_w > 0 else 0.0
                             y_norm = (center_y - cy) / cell_h if cell_h > 0 else 0.0
-                            row.extend([round(x_norm, 4), round(y_norm, 4)])
+                            x_mm = x_norm * w_mm
+                            y_mm = y_norm * h_mm
+                            row.extend([round(x_mm, 4), round(y_mm, 4)])
                         else:
                             row.extend(["", ""])
                     csv_writer.writerow(row)
+                    last_csv_frame_idx = global_idx
 
                 all_cell_counts.append(cell_counts)
                 total_fish_counts.append(len(all_centroids))

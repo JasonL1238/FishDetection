@@ -11,6 +11,27 @@ from typing import List, Tuple, Optional
 
 from .hsv_masker import HSVMasker
 
+COLS = 7
+ROWS = 4
+
+# Physical lane dimensions (mm) from Phil Campbell's measurements.
+# Rows 0 and 3 (outer) are large compartments: 80 x 30 mm
+# Rows 1 and 2 (middle) are end compartments: 18 x 30 mm
+# Width (x) is always 30 mm per column.
+CELL_WIDTH_MM = 30.0
+ROW_HEIGHT_MM = {
+    0: 80.0,
+    1: 18.0,
+    2: 18.0,
+    3: 80.0,
+}
+
+
+def get_cell_mm(cell_idx: int) -> Tuple[float, float]:
+    """Return (width_mm, height_mm) for a given cell index (0-based, row-major)."""
+    row = cell_idx // COLS
+    return CELL_WIDTH_MM, ROW_HEIGHT_MM[row]
+
 
 def get_grid_cells(width: int, height: int) -> Tuple[List[tuple], List[int]]:
     """

@@ -18,7 +18,14 @@ python run.py
 
 # Analyze per-fish tracking accuracy (after running the pipeline)
 python analyze.py
+
+# Analyze movement from the exported positions CSV (after running the pipeline)
+python analyze_positions.py --run-dir data/output/<video_stem>
 ```
+
+This will create `data/output/<video_stem>/analysis/` containing:
+- `distance_summary.csv` (per-fish distance traveled and coverage stats)
+- `fish01_xy_over_time.png` … `fish28_xy_over_time.png` (x(t) and y(t) plots)
 
 ## How it works
 
@@ -34,7 +41,9 @@ python analyze.py
 FishDetection/
 ├── run.py                  # Pipeline entry point
 ├── analyze.py              # Per-fish tracking analysis
+├── analyze_positions.py     # Movement analysis from positions CSV
 ├── pyproject.toml          # Package config and dependencies
+├── analysis/               # CSV-based analysis helpers
 ├── data/
 │   └── input/
 │       └── videos/         # Place input videos here (gitignored)
