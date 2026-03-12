@@ -28,6 +28,8 @@ class FishDistanceSummary:
     time_moving_sec: float
     time_stationary_sec: float
     pct_moving: float
+    frac_time_close_half: Optional[float]
+    frac_dist_close_half: Optional[float]
 
 
 def find_positions_csv(run_dir: Path) -> Path:
@@ -241,13 +243,63 @@ def _time_moving(
     return time_mov, time_stat, pct
 
 
+def _close_half_fractions(
+    traj: FishTrajectory,
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Fraction of time and distance spent in the half of the cell closest
+    to the middle fish (rows 1/2).
+
+    Row 0 (top large): close half = y < 0 (below center, toward middle rows)
+    Row 3 (bottom large): close half = y > 0 (above center, toward middle rows)
+    Rows 1/2 (middle): not applicable, returns (None, None).
+    """
+    row = (traj.fish_id - 1) // COLS
+
+    if row not in (0, 3):
+        return None, None
+
+    x, y, t = traj.x, traj.y, traj.time_sec
+    valid = np.isfinite(x) & np.isfinite(y)
+
+    if valid.sum() < 2:
+        return None, None
+
+    yv = y[valid]
+    xv = x[valid]
+    tv = t[valid]
+
+    if row == 0:
+        in_close = yv < 0
+    else:
+        in_close = yv > 0
+
+    # Fraction of time: use start-of-interval position to classify each step
+    dt = np.diff(tv)
+    in_close_steps = in_close[:-1]
+    total_time = float(np.sum(dt))
+    time_close = float(np.sum(dt[in_close_steps]))
+    frac_time = (time_close / total_time) if total_time > 0 else 0.0
+
+    # Fraction of distance: classify each step by its start position
+    dx = np.diff(xv)
+    dy = np.diff(yv)
+    step_dist = np.sqrt(dx * dx + dy * dy)
+    total_dist = float(np.sum(step_dist))
+    dist_close = float(np.sum(step_dist[in_close_steps]))
+    frac_dist = (dist_close / total_dist) if total_dist > 0 else 0.0
+
+    return frac_time, frac_dist
+
+
 def compute_fish_summary(
     traj: FishTrajectory,
     epsilon_mm: float,
 ) -> FishDistanceSummary:
-    """Build a full per-fish summary: distance + time moving."""
+    """Build a full per-fish summary: distance + time moving + close-half fractions."""
     dist, n_total, n_valid, coverage, n_gaps = _bridged_distance(traj)
     time_mov, time_stat, pct_mov = _time_moving(traj, epsilon_mm)
+    frac_time_close, frac_dist_close = _close_half_fractions(traj)
 
     return FishDistanceSummary(
         fish_id=traj.fish_id,
@@ -259,6 +311,8 @@ def compute_fish_summary(
         time_moving_sec=time_mov,
         time_stationary_sec=time_stat,
         pct_moving=pct_mov,
+        frac_time_close_half=frac_time_close,
+        frac_dist_close_half=frac_dist_close,
     )
 
 
@@ -283,6 +337,8 @@ def write_distance_summary_csv(
                 "time_moving_sec",
                 "time_stationary_sec",
                 "pct_moving",
+                "frac_time_close_half",
+                "frac_dist_close_half",
             ]
         )
         for s in rows:
@@ -297,5 +353,7 @@ def write_distance_summary_csv(
                     round(s.time_moving_sec, 4),
                     round(s.time_stationary_sec, 4),
                     round(s.pct_moving, 2),
+                    round(s.frac_time_close_half, 4) if s.frac_time_close_half is not None else "",
+                    round(s.frac_dist_close_half, 4) if s.frac_dist_close_half is not None else "",
                 ]
             )
