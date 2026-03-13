@@ -3,7 +3,7 @@
 Analyze fish movement from a pipeline `*_positions.csv` export.
 
 Outputs:
-  - distance_summary.csv (per-fish distance in mm, time moving/stationary)
+  - distance_summary_binned.csv (per-fish, per-bin metrics in absolute units)
   - fish01_xy_over_time.png ... fish28_xy_over_time.png (x(t), y(t) in mm)
 """
 
@@ -14,9 +14,10 @@ from pathlib import Path
 
 from analysis.positions import (
     build_trajectories,
-    compute_fish_summary,
+    compute_bin_summary,
     find_positions_csv,
     load_positions_csv,
+    slice_trajectory_into_bins,
     write_distance_summary_csv,
 )
 from analysis.plots import plot_xy_over_time
@@ -62,7 +63,14 @@ def main() -> None:
         type=float,
         default=0.25,
         help="Distance threshold (mm) below which a frame-to-frame step "
-             "counts as stationary (default: 0.5).",
+             "counts as stationary (default: 0.25).",
+    )
+    parser.add_argument(
+        "--bin-size-sec",
+        type=float,
+        default=5.0,
+        help="Time bin size in seconds (default: 5.0). Smaller bins give "
+             "finer resolution but can be aggregated into larger windows.",
     )
     args = parser.parse_args()
 
@@ -85,6 +93,7 @@ def main() -> None:
     print(f"Positions CSV: {csv_path}")
     print(f"Analysis out:  {out_dir}")
     print(f"Movement threshold: {args.movement_threshold_mm} mm")
+    print(f"Bin size: {args.bin_size_sec} sec")
 
     time_sec, frame, fish_xy, units = load_positions_csv(
         csv_path, fish_count=args.fish_count
@@ -93,10 +102,21 @@ def main() -> None:
 
     trajs = build_trajectories(time_sec, fish_xy)
 
-    summaries = [
-        compute_fish_summary(tr, args.movement_threshold_mm) for tr in trajs
-    ]
-    write_distance_summary_csv(summaries, out_dir / "distance_summary.csv")
+    all_bin_summaries = []
+    for tr in trajs:
+        bins = slice_trajectory_into_bins(tr, args.bin_size_sec)
+        for bin_idx, bin_start, bin_end, sub_traj in bins:
+            summary = compute_bin_summary(
+                sub_traj, bin_idx, bin_start, bin_end,
+                args.movement_threshold_mm,
+            )
+            all_bin_summaries.append(summary)
+
+    write_distance_summary_csv(
+        all_bin_summaries, out_dir / "distance_summary_binned.csv"
+    )
+    print(f"Wrote {len(all_bin_summaries)} bin summaries "
+          f"({len(trajs)} fish x {args.bin_size_sec}s bins)")
 
     for tr in trajs:
         out_path = out_dir / f"fish{tr.fish_id:02d}_xy_over_time.png"

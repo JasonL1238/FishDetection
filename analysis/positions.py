@@ -18,18 +18,22 @@ class FishTrajectory:
 
 
 @dataclass(frozen=True)
-class FishDistanceSummary:
+class FishBinSummary:
     fish_id: int
+    bin_index: int
+    bin_start_sec: float
+    bin_end_sec: float
+    bin_duration_sec: float
     distance_total_mm: float
+    speed_mm_per_sec: float
     n_samples_total: int
     n_samples_valid: int
-    coverage_pct: float
+    coverage_sec: float
     n_gaps: int
     time_moving_sec: float
     time_stationary_sec: float
-    pct_moving: float
-    frac_time_close_half: Optional[float]
-    frac_dist_close_half: Optional[float]
+    time_close_half_sec: Optional[float]
+    dist_close_half_mm: Optional[float]
 
 
 def find_positions_csv(run_dir: Path) -> Path:
@@ -158,6 +162,46 @@ def build_trajectories(
     return trajs
 
 
+def slice_trajectory_into_bins(
+    traj: FishTrajectory,
+    bin_size_sec: float,
+) -> List[Tuple[int, float, float, FishTrajectory]]:
+    """
+    Slice a trajectory into fixed-duration, non-overlapping time bins.
+
+    Returns list of (bin_index, bin_start_sec, bin_end_sec, sub_trajectory).
+    The last bin may be shorter than bin_size_sec.
+    """
+    t = traj.time_sec
+    t_start = float(t[0])
+    t_end = float(t[-1])
+
+    bins: List[Tuple[int, float, float, FishTrajectory]] = []
+    bin_idx = 0
+    current_start = t_start
+
+    while current_start < t_end:
+        current_end = current_start + bin_size_sec
+        mask = (t >= current_start) & (t < current_end)
+        # Include the very last sample in the final bin
+        if current_end >= t_end:
+            mask = mask | (t == t_end)
+
+        if mask.any():
+            sub_traj = FishTrajectory(
+                fish_id=traj.fish_id,
+                time_sec=t[mask],
+                x=traj.x[mask],
+                y=traj.y[mask],
+            )
+            bins.append((bin_idx, current_start, current_end, sub_traj))
+
+        bin_idx += 1
+        current_start = current_end
+
+    return bins
+
+
 def count_missing_gaps(valid_mask: np.ndarray) -> int:
     """
     Count contiguous missing stretches that occur after at least one valid sample.
@@ -187,18 +231,20 @@ def _bridged_distance(traj: FishTrajectory) -> Tuple[float, int, int, float, int
     Core distance computation: sum Euclidean distances between successive
     valid samples (bridging gaps).
 
-    Returns (distance_mm, n_total, n_valid, coverage_pct, n_gaps).
+    Returns (distance_mm, n_total, n_valid, coverage_sec, n_gaps).
     """
-    x, y = traj.x, traj.y
+    x, y, t = traj.x, traj.y, traj.time_sec
     valid = np.isfinite(x) & np.isfinite(y)
 
     n_total = int(valid.size)
     n_valid = int(valid.sum())
-    coverage = (n_valid / n_total * 100.0) if n_total > 0 else 0.0
     n_gaps = count_missing_gaps(valid)
 
+    dt = np.diff(t)
+    coverage_sec = float(np.sum(dt[valid[:-1]])) if len(dt) > 0 else 0.0
+
     if n_valid < 2:
-        return 0.0, n_total, n_valid, coverage, n_gaps
+        return 0.0, n_total, n_valid, coverage_sec, n_gaps
 
     xv = x[valid]
     yv = y[valid]
@@ -206,24 +252,24 @@ def _bridged_distance(traj: FishTrajectory) -> Tuple[float, int, int, float, int
     dy = np.diff(yv)
     dist = float(np.sum(np.sqrt(dx * dx + dy * dy)))
 
-    return dist, n_total, n_valid, coverage, n_gaps
+    return dist, n_total, n_valid, coverage_sec, n_gaps
 
 
 def _time_moving(
     traj: FishTrajectory,
     epsilon_mm: float,
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float]:
     """
-    Option A: a frame counts as "moving" if the step distance from the
+    A frame counts as "moving" if the step distance from the
     previous valid sample exceeds epsilon_mm.
 
-    Returns (time_moving_sec, time_stationary_sec, pct_moving).
+    Returns (time_moving_sec, time_stationary_sec).
     """
     x, y, t = traj.x, traj.y, traj.time_sec
     valid = np.isfinite(x) & np.isfinite(y)
 
     if valid.sum() < 2:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0
 
     xv = x[valid]
     yv = y[valid]
@@ -237,18 +283,16 @@ def _time_moving(
     moving = d > epsilon_mm
     time_mov = float(np.sum(dt[moving]))
     time_stat = float(np.sum(dt[~moving]))
-    total = time_mov + time_stat
-    pct = (time_mov / total * 100.0) if total > 0 else 0.0
 
-    return time_mov, time_stat, pct
+    return time_mov, time_stat
 
 
-def _close_half_fractions(
+def _close_half_metrics(
     traj: FishTrajectory,
 ) -> Tuple[Optional[float], Optional[float]]:
     """
-    Fraction of time and distance spent in the half of the cell closest
-    to the middle fish (rows 1/2).
+    Absolute time (seconds) and distance (mm) spent in the half of the cell
+    closest to the middle fish (rows 1/2).
 
     Row 0 (top large): close half = y < 0 (below center, toward middle rows)
     Row 3 (bottom large): close half = y > 0 (above center, toward middle rows)
@@ -274,50 +318,101 @@ def _close_half_fractions(
     else:
         in_close = yv > 0
 
-    # Fraction of time: use start-of-interval position to classify each step
     dt = np.diff(tv)
     in_close_steps = in_close[:-1]
-    total_time = float(np.sum(dt))
-    time_close = float(np.sum(dt[in_close_steps]))
-    frac_time = (time_close / total_time) if total_time > 0 else 0.0
+    time_close_sec = float(np.sum(dt[in_close_steps]))
 
-    # Fraction of distance: classify each step by its start position
     dx = np.diff(xv)
     dy = np.diff(yv)
     step_dist = np.sqrt(dx * dx + dy * dy)
-    total_dist = float(np.sum(step_dist))
-    dist_close = float(np.sum(step_dist[in_close_steps]))
-    frac_dist = (dist_close / total_dist) if total_dist > 0 else 0.0
+    dist_close_mm = float(np.sum(step_dist[in_close_steps]))
 
-    return frac_time, frac_dist
+    return time_close_sec, dist_close_mm
 
 
-def compute_fish_summary(
+def compute_bin_summary(
     traj: FishTrajectory,
+    bin_index: int,
+    bin_start: float,
+    bin_end: float,
     epsilon_mm: float,
-) -> FishDistanceSummary:
-    """Build a full per-fish summary: distance + time moving + close-half fractions."""
-    dist, n_total, n_valid, coverage, n_gaps = _bridged_distance(traj)
-    time_mov, time_stat, pct_mov = _time_moving(traj, epsilon_mm)
-    frac_time_close, frac_dist_close = _close_half_fractions(traj)
+) -> FishBinSummary:
+    """Build a per-fish, per-bin summary with all metrics in absolute units."""
+    dist, n_total, n_valid, coverage_sec, n_gaps = _bridged_distance(traj)
+    time_mov, time_stat = _time_moving(traj, epsilon_mm)
+    time_close_sec, dist_close_mm = _close_half_metrics(traj)
 
-    return FishDistanceSummary(
+    elapsed = bin_end - bin_start
+    speed = dist / elapsed if elapsed > 0 else 0.0
+
+    return FishBinSummary(
         fish_id=traj.fish_id,
+        bin_index=bin_index,
+        bin_start_sec=bin_start,
+        bin_end_sec=bin_end,
+        bin_duration_sec=elapsed,
         distance_total_mm=dist,
+        speed_mm_per_sec=speed,
         n_samples_total=n_total,
         n_samples_valid=n_valid,
-        coverage_pct=coverage,
+        coverage_sec=coverage_sec,
         n_gaps=n_gaps,
         time_moving_sec=time_mov,
         time_stationary_sec=time_stat,
-        pct_moving=pct_mov,
-        frac_time_close_half=frac_time_close,
-        frac_dist_close_half=frac_dist_close,
+        time_close_half_sec=time_close_sec,
+        dist_close_half_mm=dist_close_mm,
+    )
+
+
+def aggregate_bins(bins: List[FishBinSummary]) -> FishBinSummary:
+    """
+    Aggregate consecutive FishBinSummary records into a single summary.
+
+    All additive fields are summed; speed is recomputed from the totals.
+    All bins must belong to the same fish_id.
+    """
+    if not bins:
+        raise ValueError("Cannot aggregate an empty list of bins")
+
+    fish_id = bins[0].fish_id
+    if any(b.fish_id != fish_id for b in bins):
+        raise ValueError("All bins must belong to the same fish_id")
+
+    total_dist = sum(b.distance_total_mm for b in bins)
+    total_duration = bins[-1].bin_end_sec - bins[0].bin_start_sec
+    speed = total_dist / total_duration if total_duration > 0 else 0.0
+
+    has_close = bins[0].time_close_half_sec is not None
+    time_close = (
+        sum(b.time_close_half_sec for b in bins if b.time_close_half_sec is not None)
+        if has_close else None
+    )
+    dist_close = (
+        sum(b.dist_close_half_mm for b in bins if b.dist_close_half_mm is not None)
+        if has_close else None
+    )
+
+    return FishBinSummary(
+        fish_id=fish_id,
+        bin_index=bins[0].bin_index,
+        bin_start_sec=bins[0].bin_start_sec,
+        bin_end_sec=bins[-1].bin_end_sec,
+        bin_duration_sec=total_duration,
+        distance_total_mm=total_dist,
+        speed_mm_per_sec=speed,
+        n_samples_total=sum(b.n_samples_total for b in bins),
+        n_samples_valid=sum(b.n_samples_valid for b in bins),
+        coverage_sec=sum(b.coverage_sec for b in bins),
+        n_gaps=sum(b.n_gaps for b in bins),
+        time_moving_sec=sum(b.time_moving_sec for b in bins),
+        time_stationary_sec=sum(b.time_stationary_sec for b in bins),
+        time_close_half_sec=time_close,
+        dist_close_half_mm=dist_close,
     )
 
 
 def write_distance_summary_csv(
-    summaries: Iterable[FishDistanceSummary],
+    summaries: Iterable[FishBinSummary],
     out_csv_path: Path,
 ) -> None:
     out_csv_path = Path(out_csv_path)
@@ -329,31 +424,39 @@ def write_distance_summary_csv(
         writer.writerow(
             [
                 "fish_id",
+                "bin_index",
+                "bin_start_sec",
+                "bin_end_sec",
+                "bin_duration_sec",
                 "distance_total_mm",
+                "speed_mm_per_sec",
                 "n_samples_total",
                 "n_samples_valid",
-                "coverage_pct",
+                "coverage_sec",
                 "n_gaps",
                 "time_moving_sec",
                 "time_stationary_sec",
-                "pct_moving",
-                "frac_time_close_half",
-                "frac_dist_close_half",
+                "time_close_half_sec",
+                "dist_close_half_mm",
             ]
         )
         for s in rows:
             writer.writerow(
                 [
                     s.fish_id,
+                    s.bin_index,
+                    round(s.bin_start_sec, 4),
+                    round(s.bin_end_sec, 4),
+                    round(s.bin_duration_sec, 4),
                     round(s.distance_total_mm, 4),
+                    round(s.speed_mm_per_sec, 4),
                     s.n_samples_total,
                     s.n_samples_valid,
-                    round(s.coverage_pct, 3),
+                    round(s.coverage_sec, 4),
                     s.n_gaps,
                     round(s.time_moving_sec, 4),
                     round(s.time_stationary_sec, 4),
-                    round(s.pct_moving, 2),
-                    round(s.frac_time_close_half, 4) if s.frac_time_close_half is not None else "",
-                    round(s.frac_dist_close_half, 4) if s.frac_dist_close_half is not None else "",
+                    round(s.time_close_half_sec, 4) if s.time_close_half_sec is not None else "",
+                    round(s.dist_close_half_mm, 4) if s.dist_close_half_mm is not None else "",
                 ]
             )
