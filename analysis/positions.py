@@ -34,6 +34,8 @@ class FishBinSummary:
     time_stationary_sec: float
     time_close_half_sec: Optional[float]
     dist_close_half_mm: Optional[float]
+    time_near_social_sec: Optional[float]
+    dist_near_social_mm: Optional[float]
 
 
 def find_positions_csv(run_dir: Path) -> Path:
@@ -67,6 +69,7 @@ def _detect_units(fieldnames: list[str]) -> str:
 COLS = 7
 CELL_WIDTH_MM = 30.0
 ROW_HEIGHT_MM = {0: 80.0, 1: 18.0, 2: 18.0, 3: 80.0}
+SOCIAL_BAND_MM = 5.0
 
 
 def _norm_to_mm(fish_id: int, x_norm: float, y_norm: float) -> Tuple[float, float]:
@@ -330,6 +333,51 @@ def _close_half_metrics(
     return time_close_sec, dist_close_mm
 
 
+def _near_social_window_metrics(
+    traj: FishTrajectory,
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Absolute time (seconds) and distance (mm) spent within SOCIAL_BAND_MM
+    of the cell edge closest to the social window (middle rows).
+
+    Row 0: social edge is y = -half_height (bottom). Band: y in [-40, -35].
+    Row 3: social edge is y = +half_height (top).    Band: y in [35, 40].
+    Rows 1/2: not applicable, returns (None, None).
+    """
+    row = (traj.fish_id - 1) // COLS
+
+    if row not in (0, 3):
+        return None, None
+
+    x, y, t = traj.x, traj.y, traj.time_sec
+    valid = np.isfinite(x) & np.isfinite(y)
+
+    if valid.sum() < 2:
+        return None, None
+
+    yv = y[valid]
+    xv = x[valid]
+    tv = t[valid]
+
+    half_h = ROW_HEIGHT_MM[row] / 2.0
+
+    if row == 0:
+        in_band = (yv >= -half_h) & (yv <= -half_h + SOCIAL_BAND_MM)
+    else:
+        in_band = (yv >= half_h - SOCIAL_BAND_MM) & (yv <= half_h)
+
+    dt = np.diff(tv)
+    in_band_steps = in_band[:-1]
+    time_near_sec = float(np.sum(dt[in_band_steps]))
+
+    dx = np.diff(xv)
+    dy = np.diff(yv)
+    step_dist = np.sqrt(dx * dx + dy * dy)
+    dist_near_mm = float(np.sum(step_dist[in_band_steps]))
+
+    return time_near_sec, dist_near_mm
+
+
 def compute_bin_summary(
     traj: FishTrajectory,
     bin_index: int,
@@ -341,6 +389,7 @@ def compute_bin_summary(
     dist, n_total, n_valid, coverage_sec, n_gaps = _bridged_distance(traj)
     time_mov, time_stat = _time_moving(traj, epsilon_mm)
     time_close_sec, dist_close_mm = _close_half_metrics(traj)
+    time_near_social, dist_near_social = _near_social_window_metrics(traj)
 
     elapsed = bin_end - bin_start
     speed = dist / elapsed if elapsed > 0 else 0.0
@@ -361,6 +410,8 @@ def compute_bin_summary(
         time_stationary_sec=time_stat,
         time_close_half_sec=time_close_sec,
         dist_close_half_mm=dist_close_mm,
+        time_near_social_sec=time_near_social,
+        dist_near_social_mm=dist_near_social,
     )
 
 
@@ -392,6 +443,16 @@ def aggregate_bins(bins: List[FishBinSummary]) -> FishBinSummary:
         if has_close else None
     )
 
+    has_social = bins[0].time_near_social_sec is not None
+    time_social = (
+        sum(b.time_near_social_sec for b in bins if b.time_near_social_sec is not None)
+        if has_social else None
+    )
+    dist_social = (
+        sum(b.dist_near_social_mm for b in bins if b.dist_near_social_mm is not None)
+        if has_social else None
+    )
+
     return FishBinSummary(
         fish_id=fish_id,
         bin_index=bins[0].bin_index,
@@ -408,6 +469,8 @@ def aggregate_bins(bins: List[FishBinSummary]) -> FishBinSummary:
         time_stationary_sec=sum(b.time_stationary_sec for b in bins),
         time_close_half_sec=time_close,
         dist_close_half_mm=dist_close,
+        time_near_social_sec=time_social,
+        dist_near_social_mm=dist_social,
     )
 
 
@@ -438,6 +501,8 @@ def write_distance_summary_csv(
                 "time_stationary_sec",
                 "time_close_half_sec",
                 "dist_close_half_mm",
+                "time_near_social_sec",
+                "dist_near_social_mm",
             ]
         )
         for s in rows:
@@ -458,5 +523,7 @@ def write_distance_summary_csv(
                     round(s.time_stationary_sec, 4),
                     round(s.time_close_half_sec, 4) if s.time_close_half_sec is not None else "",
                     round(s.dist_close_half_mm, 4) if s.dist_close_half_mm is not None else "",
+                    round(s.time_near_social_sec, 4) if s.time_near_social_sec is not None else "",
+                    round(s.dist_near_social_mm, 4) if s.dist_near_social_mm is not None else "",
                 ]
             )
