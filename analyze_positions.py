@@ -68,9 +68,9 @@ def main() -> None:
     parser.add_argument(
         "--bin-size-sec",
         type=float,
-        default=5.0,
-        help="Time bin size in seconds (default: 5.0). Smaller bins give "
-             "finer resolution but can be aggregated into larger windows.",
+        default=0.05,
+        help="Time bin size in seconds (default: 0.05, i.e. per-frame at 20 FPS). "
+             "Larger bins can be reconstructed by aggregating smaller ones.",
     )
     args = parser.parse_args()
 
