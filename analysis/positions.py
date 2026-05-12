@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import csv
+import json
 import math
 
 import numpy as np
+
+from . import geometry as geom
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,42 @@ class FishBinSummary:
     dist_close_half_mm: Optional[float]
     time_near_social_sec: Optional[float]
     dist_near_social_mm: Optional[float]
+
+
+@dataclass(frozen=True)
+class FishGeometryBinMetrics:
+    fish_id: int
+    bin_index: int
+    bin_start_sec: float
+    bin_end_sec: float
+    row: int
+    col: int
+    cell_type: str
+    mean_centroid_dist_mm: float
+    mean_wall_dist_mm: float
+    frac_outer_edge: float
+    n_geom_samples: int
+
+
+@dataclass(frozen=True)
+class FishPairwiseMiddleBinMetrics:
+    fish_id: int
+    bin_index: int
+    bin_start_sec: float
+    bin_end_sec: float
+    middle_fish_id: Optional[int]
+    mean_d_middle_euclid_mm: float
+    n_valid_pair: int
+
+
+def _bin_time_mask(
+    t: np.ndarray, bin_start: float, bin_end: float, t_end: float
+) -> np.ndarray:
+    """Match slice_trajectory_into_bins inclusion of the last sample."""
+    mask = (t >= bin_start) & (t < bin_end)
+    if bin_end >= t_end:
+        mask = mask | (t == t_end)
+    return mask
 
 
 def find_positions_csv(run_dir: Path) -> Path:
@@ -415,6 +454,121 @@ def compute_bin_summary(
     )
 
 
+def compute_geometry_bin_metrics(
+    traj: FishTrajectory,
+    bin_index: int,
+    bin_start: float,
+    bin_end: float,
+    outer_edge_alpha: float,
+) -> FishGeometryBinMetrics:
+    """Per-bin geometry: center distance, wall distance, outer-edge fraction."""
+    row = geom.fish_row(traj.fish_id)
+    col = geom.fish_col(traj.fish_id)
+    ct = geom.cell_type(traj.fish_id)
+    x, y = traj.x, traj.y
+    valid = np.isfinite(x) & np.isfinite(y)
+    n = int(valid.sum())
+    if n == 0:
+        return FishGeometryBinMetrics(
+            fish_id=traj.fish_id,
+            bin_index=bin_index,
+            bin_start_sec=bin_start,
+            bin_end_sec=bin_end,
+            row=row,
+            col=col,
+            cell_type=ct,
+            mean_centroid_dist_mm=float("nan"),
+            mean_wall_dist_mm=float("nan"),
+            frac_outer_edge=0.0,
+            n_geom_samples=0,
+        )
+    xv = x[valid]
+    yv = y[valid]
+    hw, hh = geom.cell_half_dims_mm(traj.fish_id)
+    cent = np.hypot(xv, yv)
+    wall = np.minimum(hw - np.abs(xv), hh - np.abs(yv))
+    thresh = outer_edge_alpha * min(hw, hh)
+    outer = wall < thresh
+    return FishGeometryBinMetrics(
+        fish_id=traj.fish_id,
+        bin_index=bin_index,
+        bin_start_sec=bin_start,
+        bin_end_sec=bin_end,
+        row=row,
+        col=col,
+        cell_type=ct,
+        mean_centroid_dist_mm=float(np.mean(cent)),
+        mean_wall_dist_mm=float(np.mean(wall)),
+        frac_outer_edge=float(np.mean(outer.astype(float))),
+        n_geom_samples=n,
+    )
+
+
+def compute_pairwise_middle_bin_metrics(
+    focal_full: FishTrajectory,
+    middle_full: Optional[FishTrajectory],
+    bin_index: int,
+    bin_start: float,
+    bin_end: float,
+) -> FishPairwiseMiddleBinMetrics:
+    """
+    Mean Euclidean distance (mm) between focal and middle fish in the column
+    plane: horizontal delta uses shared cell-local x; vertical delta uses
+    stacked column coordinate s (see geometry.column_axis_s_mm_batch).
+
+    Uses the full shared timeline with a bin time mask (same as bin slicing).
+    Large-row fish only have a defined middle; others get middle_fish_id None.
+    """
+    mid_id = geom.middle_fish_id(focal_full.fish_id)
+    if mid_id is None or middle_full is None:
+        return FishPairwiseMiddleBinMetrics(
+            fish_id=focal_full.fish_id,
+            bin_index=bin_index,
+            bin_start_sec=bin_start,
+            bin_end_sec=bin_end,
+            middle_fish_id=None,
+            mean_d_middle_euclid_mm=float("nan"),
+            n_valid_pair=0,
+        )
+
+    t = focal_full.time_sec
+    t_end = float(t[-1])
+    mask = _bin_time_mask(t, bin_start, bin_end, t_end)
+    xf, yf = focal_full.x, focal_full.y
+    xm, ym = middle_full.x, middle_full.y
+    valid = (
+        mask
+        & np.isfinite(xf)
+        & np.isfinite(yf)
+        & np.isfinite(xm)
+        & np.isfinite(ym)
+    )
+    n = int(valid.sum())
+    if n == 0:
+        return FishPairwiseMiddleBinMetrics(
+            fish_id=focal_full.fish_id,
+            bin_index=bin_index,
+            bin_start_sec=bin_start,
+            bin_end_sec=bin_end,
+            middle_fish_id=mid_id,
+            mean_d_middle_euclid_mm=float("nan"),
+            n_valid_pair=0,
+        )
+
+    sf = geom.column_axis_s_mm_batch(focal_full.fish_id, yf)
+    sm = geom.column_axis_s_mm_batch(middle_full.fish_id, ym)
+    d = np.hypot(xf - xm, sf - sm)
+    return FishPairwiseMiddleBinMetrics(
+        fish_id=focal_full.fish_id,
+        bin_index=bin_index,
+        bin_start_sec=bin_start,
+        bin_end_sec=bin_end,
+        middle_fish_id=mid_id,
+        mean_d_middle_euclid_mm=float(np.mean(d[valid])),
+        n_valid_pair=n,
+    )
+
+
 def aggregate_bins(bins: List[FishBinSummary]) -> FishBinSummary:
     """
     Aggregate consecutive FishBinSummary records into a single summary.
@@ -527,3 +681,210 @@ def write_distance_summary_csv(
                     round(s.dist_near_social_mm, 4) if s.dist_near_social_mm is not None else "",
                 ]
             )
+
+
+def _csv_num(v: float) -> str:
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return ""
+    return str(round(float(v), 4))
+
+
+def write_bins_locomotion_csv(
+    summaries: Iterable[FishBinSummary],
+    out_csv_path: Path,
+) -> None:
+    out_csv_path = Path(out_csv_path)
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = list(summaries)
+    with open(out_csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "fish_id",
+                "bin_index",
+                "bin_start_sec",
+                "bin_end_sec",
+                "bin_duration_sec",
+                "distance_total_mm",
+                "speed_mm_per_sec",
+                "n_samples_total",
+                "n_samples_valid",
+                "coverage_sec",
+                "n_gaps",
+                "time_moving_sec",
+                "time_stationary_sec",
+            ]
+        )
+        for s in rows:
+            w.writerow(
+                [
+                    s.fish_id,
+                    s.bin_index,
+                    round(s.bin_start_sec, 4),
+                    round(s.bin_end_sec, 4),
+                    round(s.bin_duration_sec, 4),
+                    round(s.distance_total_mm, 4),
+                    round(s.speed_mm_per_sec, 4),
+                    s.n_samples_total,
+                    s.n_samples_valid,
+                    round(s.coverage_sec, 4),
+                    s.n_gaps,
+                    round(s.time_moving_sec, 4),
+                    round(s.time_stationary_sec, 4),
+                ]
+            )
+
+
+def write_bins_social_large_cells_csv(
+    summaries: Iterable[FishBinSummary],
+    out_csv_path: Path,
+) -> None:
+    """Social columns; blank for small-cell fish (rows 1–2)."""
+    out_csv_path = Path(out_csv_path)
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = list(summaries)
+    with open(out_csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "fish_id",
+                "bin_index",
+                "bin_start_sec",
+                "bin_end_sec",
+                "bin_duration_sec",
+                "time_close_half_sec",
+                "dist_close_half_mm",
+                "time_near_social_sec",
+                "dist_near_social_mm",
+            ]
+        )
+        for s in rows:
+            w.writerow(
+                [
+                    s.fish_id,
+                    s.bin_index,
+                    round(s.bin_start_sec, 4),
+                    round(s.bin_end_sec, 4),
+                    round(s.bin_duration_sec, 4),
+                    round(s.time_close_half_sec, 4)
+                    if s.time_close_half_sec is not None
+                    else "",
+                    round(s.dist_close_half_mm, 4)
+                    if s.dist_close_half_mm is not None
+                    else "",
+                    round(s.time_near_social_sec, 4)
+                    if s.time_near_social_sec is not None
+                    else "",
+                    round(s.dist_near_social_mm, 4)
+                    if s.dist_near_social_mm is not None
+                    else "",
+                ]
+            )
+
+
+def write_bins_geometry_csv(
+    metrics: Iterable[FishGeometryBinMetrics],
+    out_csv_path: Path,
+) -> None:
+    out_csv_path = Path(out_csv_path)
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = list(metrics)
+    with open(out_csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "fish_id",
+                "bin_index",
+                "bin_start_sec",
+                "bin_end_sec",
+                "row",
+                "col",
+                "cell_type",
+                "mean_centroid_dist_mm",
+                "mean_wall_dist_mm",
+                "frac_outer_edge",
+                "n_geom_samples",
+            ]
+        )
+        for m in rows:
+            w.writerow(
+                [
+                    m.fish_id,
+                    m.bin_index,
+                    round(m.bin_start_sec, 4),
+                    round(m.bin_end_sec, 4),
+                    m.row,
+                    m.col,
+                    m.cell_type,
+                    _csv_num(m.mean_centroid_dist_mm),
+                    _csv_num(m.mean_wall_dist_mm),
+                    round(m.frac_outer_edge, 6),
+                    m.n_geom_samples,
+                ]
+            )
+
+
+def write_bins_pairwise_middle_csv(
+    metrics: Iterable[FishPairwiseMiddleBinMetrics],
+    out_csv_path: Path,
+) -> None:
+    out_csv_path = Path(out_csv_path)
+    out_csv_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = list(metrics)
+    with open(out_csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "fish_id",
+                "bin_index",
+                "bin_start_sec",
+                "bin_end_sec",
+                "middle_fish_id",
+                "mean_d_middle_euclid_mm",
+                "n_valid_pair",
+            ]
+        )
+        for m in rows:
+            w.writerow(
+                [
+                    m.fish_id,
+                    m.bin_index,
+                    round(m.bin_start_sec, 4),
+                    round(m.bin_end_sec, 4),
+                    m.middle_fish_id if m.middle_fish_id is not None else "",
+                    _csv_num(m.mean_d_middle_euclid_mm),
+                    m.n_valid_pair,
+                ]
+            )
+
+
+def write_analysis_manifest(
+    out_path: Path,
+    *,
+    positions_csv: str,
+    bin_size_sec: float,
+    movement_threshold_mm: float,
+    outer_edge_alpha: float,
+    output_files: List[str],
+    pairwise_middle_definition: str,
+    middle_fish_rule: str,
+    frac_outer_edge_definition: str,
+    per_frame_csv_layout: Optional[str] = None,
+) -> None:
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "positions_csv": positions_csv,
+        "bin_size_sec": bin_size_sec,
+        "movement_threshold_mm": movement_threshold_mm,
+        "outer_edge_alpha": outer_edge_alpha,
+        "middle_fish_rule": middle_fish_rule,
+        "pairwise_middle_definition": pairwise_middle_definition,
+        "frac_outer_edge_definition": frac_outer_edge_definition,
+        "output_files": output_files,
+    }
+    if per_frame_csv_layout is not None:
+        payload["per_frame_csv_layout"] = per_frame_csv_layout
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
